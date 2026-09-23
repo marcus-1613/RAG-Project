@@ -1,0 +1,32 @@
+# ===== 核心依赖 =====
+# LangChain 相关（2026 年当前推荐写法：拆分为独立包）
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+langchain-text-splitters>=0.3.0
+
+# DeepSeek 官方 SDK（通过 langchain-openai 兼容接口调用）
+langchain-openai>=0.2.0
+
+# PDF 解析
+pypdf>=5.0.0
+
+# 向量数据库
+chromadb>=0.5.0
+langchain-chroma>=0.1.0
+
+# 本地 Embedding 模型
+sentence-transformers>=3.0.0
+langchain-huggingface>=0.1.0
+
+# Web 界面
+streamlit>=1.36.0
+
+# 环境变量加载
+python-dotenv>=1.0.0
+
+# ===== 开发 / 测试依赖 =====
+# 运行测试（tests/ 目录）
+pytest>=8.0.0
+
+# 生成测试 PDF（scripts/generate_test_pdf.py）
+reportlab>=4.0.0
