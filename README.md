@@ -9,8 +9,6 @@
 ![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-4D6BFE)
 ![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B)
 
-> 本项目面向 **AI 大模型应用开发学习** 与 **实习求职**，代码遵循真实公司项目的工程化组织方式，同时保持清晰易懂。
-
 ---
 
 ## ✨ 核心特性
@@ -28,24 +26,27 @@
 
 ## 🧭 系统架构
 
-### 整体流程
+```mermaid
+flowchart LR
+    subgraph ING["建库 Ingestion"]
+        direction LR
+        PDF["PDF"] --> LOAD["PyPDFLoader"]
+        LOAD --> SPLIT["RecursiveCharacter<br/>TextSplitter"]
+        SPLIT --> EMB["HuggingFace<br/>Embedding"]
+    end
 
-```
-        ┌───────────────────────── 建库（Ingestion）─────────────────────────┐
-        │                                                                      │
-  PDF ──▶ PyPDFLoader ──▶ RecursiveTextSplitter ──▶ HuggingFaceEmbedding ──┐  │
-        │                                                                   │  │
-        └───────────────────────────────────────────────────────────────────┼──┘
-                                                                            ▼
-                                                                ┌─────────────────────┐
-                                                                │     ChromaDB        │
-                                                                │   （向量 + 元数据）  │
-                                                                └──────────┬──────────┘
-        ┌───────────────────────── 问答（Query）───────────────────────────┐
-        │                                                                    │
-  问题 ──▶ 向量化 ──▶ 相似度检索 Top5 ──▶ 拼接 RAG Prompt ──▶ DeepSeek ──▶ 答案 │
-        │                                                                    │
-        └────────────────────────────────────────────────────────────────────┘
+    EMB --> CHROMA[("ChromaDB<br/>向量 + 元数据")]
+
+    subgraph QUERY["问答 Query"]
+        direction LR
+        Q["问题"] --> QEMB["向量化"]
+        QEMB --> RET["相似度检索 Top5"]
+        RET --> PROMPT["拼接 RAG Prompt"]
+        PROMPT --> LLM["DeepSeek"]
+        LLM --> ANS["答案 + 来源片段"]
+    end
+
+    CHROMA --> RET
 ```
 
 ### 模块划分（`src/`）
@@ -245,9 +246,3 @@ HF_ENDPOINT=https://hf-mirror.com
 - [ ] 增加知识库管理（删除、更新单个文档）
 - [ ] 支持更多文件格式（Word、Markdown、网页等）
 - [ ] 使用 GPU 加速 Embedding
-
----
-
-## 📄 许可证
-
-本项目暂未声明许可证。如需开源，建议添加一份 `LICENSE`（如 MIT）。
