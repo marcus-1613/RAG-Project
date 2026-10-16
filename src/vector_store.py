@@ -13,6 +13,9 @@ from langchain_core.documents import Document
 from src import config
 from src.embeddings import get_embeddings
 
+# 集合名集中定义，避免多处硬编码字符串不一致
+COLLECTION_NAME = "pdf_knowledge_base"
+
 
 def get_vector_store() -> Chroma:
     """获取（或创建）持久化的 ChromaDB 向量存储。
@@ -26,7 +29,7 @@ def get_vector_store() -> Chroma:
     config.CHROMA_DIR.mkdir(parents=True, exist_ok=True)
 
     return Chroma(
-        collection_name="pdf_knowledge_base",
+        collection_name=COLLECTION_NAME,
         embedding_function=get_embeddings(),
         persist_directory=str(config.CHROMA_DIR),
     )
@@ -42,6 +45,39 @@ def add_documents(documents: list[Document]) -> None:
     vector_store.add_documents(documents)
 
 
+def get_all_documents() -> list[Document]:
+    """读取向量库中的全部文本块。
+
+    用途：为 BM25 建立索引。BM25 是**全局**统计量（IDF 依赖整个语料），
+    因此不能像向量检索那样只查局部，必须拿到全量文本块。
+
+    语料规模在个人知识库场景下通常是几百到几千个 chunk，
+    一次性读入内存是可接受的。若未来语料量级增长到十万以上，
+    应改为持久化的倒排索引（如 Elasticsearch / OpenSearch）。
+
+    Returns:
+        list[Document]: 全部文本块；库不存在或为空时返回空列表。
+    """
+    try:
+        client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
+        collection = client.get_collection(COLLECTION_NAME)
+        data = collection.get(include=["documents", "metadatas"])
+    except Exception:  # noqa: BLE001 - 库不存在或为空时视为没有数据
+        return []
+
+    contents = data.get("documents") or []
+    metadatas = data.get("metadatas") or []
+    documents: list[Document] = []
+    for index, content in enumerate(contents):
+        if not content:
+            continue
+        metadata = metadatas[index] if index < len(metadatas) else {}
+        documents.append(
+            Document(page_content=content, metadata=metadata or {})
+        )
+    return documents
+
+
 def get_existing_sources() -> set[str]:
     """返回向量库中已入库的文档来源（文件名）集合。
 
@@ -52,7 +88,7 @@ def get_existing_sources() -> set[str]:
     """
     try:
         client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
-        collection = client.get_collection("pdf_knowledge_base")
+        collection = client.get_collection(COLLECTION_NAME)
         all_metadata = collection.get(include=["metadatas"])
         sources: set[str] = set()
         for meta in all_metadata.get("metadatas", []):

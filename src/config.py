@@ -29,6 +29,9 @@ PDF_DIR = BASE_DIR / "data" / "pdfs"
 # ChromaDB 持久化目录
 CHROMA_DIR = BASE_DIR / "data" / "chroma"
 
+# 评估集文件
+EVAL_SET_PATH = BASE_DIR / "eval" / "qa_set.jsonl"
+
 
 # ============================================================
 # DeepSeek 配置
@@ -65,8 +68,36 @@ CHUNK_SEPARATORS = ["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""]
 # 检索配置
 # ============================================================
 
-# 默认返回的最相似文本块数量
+# 最终返回给 LLM 的文本块数量
 TOP_K = int(os.getenv("TOP_K", "5"))
+
+# 检索模式：
+#   vector        —— 仅向量检索（原始行为，作为基线）
+#   bm25          —— 仅关键词检索
+#   hybrid        —— 向量 + BM25，用 RRF 融合
+#   hybrid_rerank —— 在 hybrid 之上再做 Cross-Encoder 精排
+RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid").strip().lower()
+
+VALID_RETRIEVAL_MODES = ("vector", "bm25", "hybrid", "hybrid_rerank")
+
+# 每路检索各自召回的候选数量（融合前）。需要大于 TOP_K，
+# 否则融合没有腾挪空间——它只能重排已有的候选。
+CANDIDATE_K = int(os.getenv("CANDIDATE_K", "20"))
+
+# RRF 融合的平滑常数
+RRF_K = int(os.getenv("RRF_K", "60"))
+
+# 是否启用 Cross-Encoder 精排（仅 hybrid_rerank 模式下生效）。
+# 关闭后 hybrid_rerank 等同于 hybrid，便于对比精排带来的增益。
+RERANK_ENABLED = os.getenv("RERANK_ENABLED", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
+# Cross-Encoder 重排模型
+RERANK_MODEL = os.getenv("RERANK_MODEL", "BAAI/bge-reranker-base")
 
 
 # ============================================================
@@ -89,3 +120,27 @@ def ensure_api_key() -> str:
             "DEEPSEEK_API_KEY（可在 https://platform.deepseek.com 申请）。"
         )
     return DEEPSEEK_API_KEY
+
+
+def ensure_valid_mode(mode: str) -> str:
+    """校验检索模式取值是否合法。
+
+    配置写错时**立即报错**，而不是静默退回默认值——静默回退会让人
+    以为在跑 hybrid，实际跑的是 vector，评估结果就全错了。
+
+    Args:
+        mode: 待校验的模式名。
+
+    Returns:
+        str: 校验通过的模式名。
+
+    Raises:
+        ValueError: 模式名不在 VALID_RETRIEVAL_MODES 中时抛出。
+    """
+    mode = (mode or "").strip().lower()
+    if mode not in VALID_RETRIEVAL_MODES:
+        raise ValueError(
+            f"无效的检索模式：{mode!r}\n"
+            f"可选值：{' / '.join(VALID_RETRIEVAL_MODES)}"
+        )
+    return mode

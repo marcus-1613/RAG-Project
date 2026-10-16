@@ -18,6 +18,13 @@ langchain-chroma>=0.1.0
 sentence-transformers>=3.0.0
 langchain-huggingface>=0.1.0
 
+# ===== 混合检索依赖 =====
+# 中文分词：BM25 是词级算法，中文没有天然词边界，必须先分词
+jieba>=0.42.1
+
+# BM25 打分实现
+rank-bm25>=0.2.2
+
 # Web 界面
 streamlit>=1.36.0
 

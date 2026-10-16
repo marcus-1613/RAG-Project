@@ -6,7 +6,6 @@ RAG 业务逻辑全部在 src/ 下的模块中实现。
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import streamlit as st
@@ -14,9 +13,10 @@ import streamlit as st
 from src import config
 from src.dedup import compute_file_hash
 from src.loader import load_pdf
+from src.rag_chain import ask
+from src.retriever import clear_retrieval_cache, describe_mode
 from src.splitter import split_documents
 from src.vector_store import add_documents, get_existing_sources
-from src.rag_chain import ask
 
 # 确保数据目录存在
 config.PDF_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,6 +54,7 @@ with st.sidebar:
             st.warning("请先上传至少一个 PDF 文件。")
         else:
             existing_sources = get_existing_sources()
+            added_any = False
 
             for uploaded in uploaded_files:
                 file_name = uploaded.name
@@ -85,6 +86,7 @@ with st.sidebar:
                         # 5. 写入 ChromaDB（内部会做 Embedding）
                         status.write("正在生成 Embedding 并写入 ChromaDB...")
                         add_documents(chunks)
+                        added_any = True
                         status.update(
                             label=f"✅ {file_name} 入库完成（{len(chunks)} 个文本块）",
                             state="complete",
@@ -98,6 +100,11 @@ with st.sidebar:
                         "请检查 PDF 是否为文字版，或查看控制台日志。"
                     )
 
+            # 语料变了，必须让 BM25 索引失效重建，
+            # 否则关键词检索仍在旧语料上打分，结果会与新库不一致。
+            if added_any:
+                clear_retrieval_cache()
+
     st.divider()
     st.header("2. 知识库状态")
 
@@ -108,6 +115,16 @@ with st.sidebar:
             st.markdown(f"- {name}")
     else:
         st.info("知识库为空，请先上传 PDF。")
+
+    st.divider()
+    st.header("3. 检索策略")
+    st.markdown(f"**{describe_mode()}**")
+    st.caption(
+        "由 `.env` 中的 `RETRIEVAL_MODE` 控制，可选 "
+        "`vector` / `bm25` / `hybrid` / `hybrid_rerank`。\n\n"
+        "想对比不同策略的检索质量，运行：\n"
+        "`python scripts/evaluate.py`"
+    )
 
 
 # ============================================================
@@ -126,9 +143,9 @@ if st.button("🔍 开始问答", type="primary"):
     else:
         try:
             with st.status("正在检索并生成回答...", expanded=True) as status:
-                status.write("正在检索...")
-                status.write("正在调用 DeepSeek...")
+                status.write(f"正在检索（{describe_mode()}）...")
                 result = ask(question)
+                status.write("正在调用 DeepSeek...")
                 status.update(label="✅ 回答完成", state="complete")
 
             # 展示最终答案
@@ -137,15 +154,25 @@ if st.button("🔍 开始问答", type="primary"):
 
             # 展示检索到的原文片段和来源
             st.divider()
-            st.subheader(f"📄 检索到的原文片段（Top {len(result.retrieved_documents)}）")
+            st.subheader(
+                f"📄 检索到的原文片段（Top {len(result.retrieved_documents)}）"
+            )
+            st.caption(f"检索策略：{result.mode_label}")
 
             for i, doc in enumerate(result.retrieved_documents, 1):
                 source = doc.metadata.get("source", "未知来源")
                 page = doc.metadata.get("page", "未知页")
+                score = result.scores[i - 1] if i - 1 < len(result.scores) else 0.0
                 with st.expander(
-                    f"片段 {i} — 来源：{source} ｜ 页码：{page}"
+                    f"片段 {i} — 来源：{source} ｜ 页码：{page} "
+                    f"｜ 相关分：{score:.4f}"
                 ):
                     st.markdown(doc.page_content)
+
+            st.caption(
+                "提示：相关分的**量纲随检索模式而变**（向量相似度 / BM25 原始分 / "
+                "RRF 融合分），只能在同一种模式内部比较高低，不要跨模式比较数值。"
+            )
 
         except ValueError as exc:
             st.error(str(exc))

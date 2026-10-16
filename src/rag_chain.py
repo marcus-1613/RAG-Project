@@ -2,6 +2,10 @@
 
 将「检索 → 构造 Prompt → 调用 LLM → 返回答案」串成一个完整流程，
 对外只暴露一个简洁的 ask 函数，app.py 无需关心内部实现。
+
+检索阶段不再直接调用向量检索，而是走 retriever.search()——
+它会按 RETRIEVAL_MODE 决定用向量、BM25、混合，还是混合 + 精排。
+本模块不需要知道这些细节。
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ from langchain_core.documents import Document
 
 from src import config
 from src.llm import get_llm
-from src.retriever import retrieve
+from src.retriever import describe_mode, search
 
 
 # 中文 RAG Prompt 模板
@@ -24,7 +28,7 @@ _SYSTEM_PROMPT = (
     "2. 如果上下文信息不足，请明确回答："
     "「知识库中没有找到足够的信息来回答这个问题。」\n"
     "3. 回答要清晰、简洁。\n"
-    "4. 如果可能，指出答案来自哪个来源。\n"
+    "4. 在句末用 [片段 N] 标注该结论来自哪一段上下文，方便核对原文。\n"
     "5. 不要把检索到的文本机械复制成一大段，用自己的话概括。\n"
     "6. 区分「知识库事实」和「模型推测」：基于上下文的回答是事实，"
     "超出上下文的推断请明确标注为推测。"
@@ -37,12 +41,19 @@ class RAGResult:
 
     answer: str
     retrieved_documents: list[Document] = field(default_factory=list)
+    scores: list[float] = field(default_factory=list)
+    mode: str = ""
+
+    @property
+    def mode_label(self) -> str:
+        """检索模式的中文说明，供界面直接展示。"""
+        return describe_mode(self.mode) if self.mode else ""
 
 
 def _build_context(documents: list[Document]) -> str:
     """将检索到的文本块拼接为上下文字符串。
 
-    每个文本块标注编号、来源文件名和页码，方便模型和用户定位。
+    每个文本块标注编号、来源文件名和页码，方便模型引用、用户核对。
 
     Args:
         documents: 检索到的文本块列表。
@@ -74,11 +85,15 @@ def _build_user_prompt(context: str, question: str) -> str:
     return (
         f"知识库上下文：\n{context}\n\n"
         f"用户问题：{question}\n\n"
-        "请根据上述上下文回答。"
+        "请根据上述上下文回答，并用 [片段 N] 标注依据。"
     )
 
 
-def ask(question: str, top_k: int | None = None) -> RAGResult:
+def ask(
+    question: str,
+    top_k: int | None = None,
+    mode: str | None = None,
+) -> RAGResult:
     """执行一次完整的 RAG 问答。
 
     流程：检索 Top-K 文本块 → 构造 Prompt → 调用 DeepSeek → 返回答案。
@@ -86,9 +101,10 @@ def ask(question: str, top_k: int | None = None) -> RAGResult:
     Args:
         question: 用户问题。
         top_k: 检索数量，默认 config.TOP_K。
+        mode: 检索模式，默认 config.RETRIEVAL_MODE。
 
     Returns:
-        RAGResult: 包含 answer 和 retrieved_documents 的结果对象。
+        RAGResult: 包含 answer、检索片段、分数与所用模式的结果对象。
 
     Raises:
         ValueError: 问题为空、知识库为空或检索不到结果时抛出。
@@ -98,13 +114,17 @@ def ask(question: str, top_k: int | None = None) -> RAGResult:
     if not question:
         raise ValueError("问题不能为空。")
 
-    # 1. 检索
-    documents = retrieve(question, top_k=top_k)
-    if not documents:
+    # 1. 检索（具体策略由 RETRIEVAL_MODE 决定）
+    effective_mode = config.ensure_valid_mode(mode or config.RETRIEVAL_MODE)
+    scored = search(question, top_k=top_k, mode=effective_mode)
+    if not scored:
         raise ValueError(
             "知识库为空，或没有检索到相关内容。\n"
             "请先上传 PDF 并点击「建立/更新知识库」。"
         )
+
+    documents = [doc for doc, _score in scored]
+    scores = [score for _doc, score in scored]
 
     # 2. 构造 Prompt
     context = _build_context(documents)
@@ -121,7 +141,12 @@ def ask(question: str, top_k: int | None = None) -> RAGResult:
 
     answer = response.content.strip() if hasattr(response, "content") else str(response)
 
-    return RAGResult(answer=answer, retrieved_documents=documents)
+    return RAGResult(
+        answer=answer,
+        retrieved_documents=documents,
+        scores=scores,
+        mode=effective_mode,
+    )
 
 
 # 供测试或命令行直接调用
@@ -135,6 +160,7 @@ if __name__ == "__main__":
     question = sys.argv[1]
     result = ask(question)
     print("=" * 60)
+    print(f"检索模式：{result.mode_label}")
     print("回答：")
     print(result.answer)
     print("=" * 60)
@@ -142,5 +168,6 @@ if __name__ == "__main__":
     for i, doc in enumerate(result.retrieved_documents, 1):
         source = doc.metadata.get("source", "未知")
         page = doc.metadata.get("page", "未知")
-        print(f"\n[{i}] {source} (页码 {page})")
+        score = result.scores[i - 1] if i - 1 < len(result.scores) else 0.0
+        print(f"\n[{i}] {source} (页码 {page})  相关分 {score:.4f}")
         print(doc.page_content[:100])
