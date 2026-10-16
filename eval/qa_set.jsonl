@@ -1,0 +1,34 @@
+# 检索质量评估集（JSONL，每行一条；以 # 开头的行是注释）
+#
+# 字段说明：
+#   question  提问
+#   keywords  相关性关键词：检索到的文本块只要包含其中任意一个，即判定为相关
+#   category  keyword = 依赖字面/专有名词命中；semantic = 需要语义理解
+#
+# 注意：关键词判定是一种**粗略但可复现**的相关性定义，偏向字面命中，
+# 对纯语义改写的问题会低估向量检索。样本量也偏小（12 条），
+# 这些数字适合用来**横向对比不同检索模式**，不适合对外宣称绝对效果。
+#
+# 本评估集配套的语料由 scripts/generate_test_pdf.py 生成。
+
+{"question": "什么是人工智能？它希望机器完成哪些任务？", "keywords": ["视觉感知", "技术科学"], "category": "semantic"}
+{"question": "监督学习和无监督学习有什么区别？", "keywords": ["无监督学习", "带标签的数据"], "category": "keyword"}
+{"question": "卷积神经网络和循环神经网络分别擅长处理什么类型的数据？", "keywords": ["卷积神经网络", "循环神经网络"], "category": "keyword"}
+{"question": "Transformer 架构在哪个领域取得了巨大成功？", "keywords": ["Transformer"], "category": "keyword"}
+{"question": "机器学习主要分为哪几类？", "keywords": ["监督学习", "无监督学习", "强化学习"], "category": "keyword"}
+{"question": "深度学习中的隐藏层起什么作用？", "keywords": ["隐藏层", "多层神经网络"], "category": "keyword"}
+
+{"question": "什么是 RAG？", "keywords": ["检索增强生成"], "category": "keyword"}
+{"question": "回答老是编造不存在的内容，有什么办法缓解？", "keywords": ["知识幻觉", "检索增强生成"], "category": "semantic"}
+{"question": "怎么让大模型的回答能够被追溯核对？", "keywords": ["可追溯性", "检索增强生成"], "category": "semantic"}
+
+{"question": "ChromaDB 是用来做什么的？", "keywords": ["ChromaDB"], "category": "keyword"}
+{"question": "Embedding 的作用是什么？", "keywords": ["Embedding", "稠密向量"], "category": "keyword"}
+{"question": "为什么说意思相近的文本在向量空间里靠得更近？", "keywords": ["距离也更近", "向量空间"], "category": "semantic"}
+
+# --- 高难度：刻意与语料**几乎没有字面重叠**的改写问法 ---
+# 这类问题 BM25 会直接落空（找不到任何共享词元），只能靠向量检索的语义匹配。
+# 它们的作用是让评估具备区分度——否则所有模式都能拿满分，对比就失去意义。
+{"question": "一本正经地胡说八道，这种毛病该怎么治？", "keywords": ["知识幻觉", "检索增强生成"], "category": "semantic-hard"}
+{"question": "能不能不靠人手写规则，让程序从例子里自己学会做事？", "keywords": ["机器学习"], "category": "semantic-hard"}
+{"question": "想让答案能说清楚是从哪份材料里来的，有什么做法？", "keywords": ["可追溯性", "来源"], "category": "semantic-hard"}
